@@ -1,0 +1,6 @@
+{
+  "dubleerimine": ["redundantsus", "normaliseerimine", "anomaliad", "korduvus", "liiasus"],
+  "dubleerimist": ["redundantsus", "normaliseerimine", "anomaliad", "korduvus", "liiasus"],
+  "võõrvõti": ["välisvõti"],
+  "välisvõti": ["võõrvõti"]
+}

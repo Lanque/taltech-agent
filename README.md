@@ -8,6 +8,7 @@ Viitepohine oppimisagent kursusematerjalide jaoks. Rakendus loeb lokaalsed mater
 - tukeldab materjalid vaiksemateks loikudeks
 - leiab loikudest peamised moisted ehk konseptsioonid
 - ehitab kohaliku otsinguindeksi
+- teeb hybrid otsingut: lexical + semantic
 - kuvab Streamliti vaates viited, chunk-id ja lehekuljed
 
 Fookus on viidetel, mitte vabalt genereeritud kokkuvotetel.
@@ -42,8 +43,9 @@ Fookus on viidetel, mitte vabalt genereeritud kokkuvotetel.
 2. `knowledge_base.py` loeb `data/` kausta failid sisse.
 3. Tekst jagatakse chunk'ideks.
 4. Iga chunki jaoks leitakse sagedasemad sisulised terminid.
-5. Chunk'idest ehitatakse TF-IDF otsinguindeks.
-6. `app.py` kasutab seda indeksit, et kuvada teemale sobivad allikad ja viited.
+5. Chunk'idest ehitatakse lexical TF-IDF indeks.
+6. Kui `sentence-transformers` mudel laeb edukalt, ehitatakse ka multilingual semantic embedding index.
+7. `app.py` kasutab hybrid-rankingut, et kuvada teemale sobivad allikad ja viited.
 
 ## Kaivitamine
 
@@ -105,6 +107,17 @@ Kui tahad mudelit ette alla tombata:
 ```
 
 Kui Ollamat pole, tootab rakendus edasi viitepohise variandina.
+
+## Semantic Search
+
+Rakendus proovib kasutada lokaalset multilingual embedding mudelit `paraphrase-multilingual-MiniLM-L12-v2`.
+
+See aitab juhul, kui:
+- kasutaja sonastab kysimuse teisiti kui materjal
+- kysimus on teises keeles kui allikas
+- otsitakse pigem sama ideed kui tapselt sama sona
+
+Kui mudel ei lae voi dependency puudub, kukub rakendus tagasi lexical otsingu peale. Sidebaris kuvatakse, kas semantic search on `sees` voi `fallback`.
 
 ## Updating
 

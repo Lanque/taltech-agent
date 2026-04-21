@@ -2,3 +2,5 @@ streamlit
 requests
 pypdf
 scikit-learn
+sentence-transformers
+numpy

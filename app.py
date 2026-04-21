@@ -13,6 +13,7 @@ from knowledge_base import (
     build_knowledge_base,
     build_search_index,
     concept_matches,
+    extract_query_terms,
     format_page_suffix,
     load_catalog,
     search_catalog,
@@ -177,7 +178,7 @@ def render_matches(matches: list[dict]) -> None:
     for idx, match in enumerate(matches, start=1):
         concepts = ", ".join(match["concepts"][:5]) if match["concepts"] else "puudub"
         st.markdown(
-            f"{idx}. `{match['source']}`{format_page_suffix(match.get('page'))} | chunk `{match['chunk_id']}` | sobivus `{match['score']}` | konseptsioonid: {concepts}"
+            f"{idx}. `{match['source']}`{format_page_suffix(match.get('page'))} | aine `{match.get('course', 'general')}` | chunk `{match['chunk_id']}` | sobivus `{match['score']}` | konseptsioonid: {concepts}"
         )
         st.caption(snippet(match["text"], 320))
 
@@ -254,6 +255,47 @@ def generated_markdown_files() -> list[Path]:
     return sorted(GENERATED_DIR.rglob("*.md"))
 
 
+def course_options(catalog: dict) -> list[str]:
+    return ["Koik ained", *sorted(catalog.get("courses", {}).keys())]
+
+
+def topic_options(catalog: dict, selected_course: str) -> list[str]:
+    if selected_course == "Koik ained":
+        topics: set[str] = set()
+        for info in catalog.get("courses", {}).values():
+            topics.update(info.get("topics", {}).keys())
+        return ["Koik peateemad", *sorted(topics)]
+
+    course_info = catalog.get("courses", {}).get(selected_course, {})
+    return ["Koik peateemad", *sorted(course_info.get("topics", {}).keys())]
+
+
+def subtopic_options(catalog: dict, selected_course: str, selected_topic: str) -> list[str]:
+    if selected_topic == "Koik peateemad":
+        return ["Koik alamteemad"]
+
+    if selected_course == "Koik ained":
+        subtopics: set[str] = set()
+        for info in catalog.get("courses", {}).values():
+            topic_info = info.get("topics", {}).get(selected_topic, {})
+            subtopics.update(topic_info.get("subtopics", []))
+        return ["Koik alamteemad", *sorted(subtopics)]
+
+    topic_info = catalog.get("courses", {}).get(selected_course, {}).get("topics", {}).get(selected_topic, {})
+    return ["Koik alamteemad", *sorted(topic_info.get("subtopics", []))]
+
+
+def source_options(catalog: dict, selected_course: str) -> list[str]:
+    if selected_course == "Koik ained":
+        return sorted(catalog.get("sources", {}).keys())
+
+    return sorted(
+        source
+        for source, info in catalog.get("sources", {}).items()
+        if info.get("course") == selected_course
+    )
+
+
 runtime = load_runtime_bundle()
 catalog = runtime["catalog"]
 search_index = runtime["search_index"]
@@ -262,13 +304,22 @@ models = list_local_models()
 with st.sidebar:
     st.subheader("Teadmistebaas")
     st.write(f"Allikaid: {len(catalog['sources'])}")
+    st.write(f"Aineid: {len(catalog.get('courses', {}))}")
     st.write(f"Konseptsioone: {len(catalog['concepts'])}")
     st.write(f"Tükke: {len(catalog['chunks'])}")
+    st.write(f"Semantic search: {'sees' if search_index.get('embedding_backend') else 'fallback'}")
     if st.button("Rebuild knowledge base"):
         runtime = rebuild_catalog()
         catalog = runtime["catalog"]
         search_index = runtime["search_index"]
         st.success("Teadmistebaas uuendatud.")
+
+    st.subheader("Browse")
+    selected_course = st.selectbox("Aine", course_options(catalog), index=0)
+    selected_topic = st.selectbox("Peateema", topic_options(catalog, selected_course), index=0)
+    selected_subtopic = st.selectbox("Alamteema", subtopic_options(catalog, selected_course, selected_topic), index=0)
+    selectable_sources = source_options(catalog, selected_course)
+    selected_sources = st.multiselect("Materjalid", selectable_sources, default=[])
 
     st.subheader("Automaatika")
     st.code(f'python "{BASE_DIR / "index_materials.py"}"')
@@ -312,19 +363,37 @@ else:
     grade_goal = 0
 
 
-if user_query:
-    matches = search_catalog(search_index, user_query, top_k=6)
-    related_concepts = concept_matches(catalog, user_query, BASE_DIR)
+active_course = None if selected_course == "Koik ained" else selected_course
+active_topic = None if selected_topic == "Koik peateemad" else selected_topic
+active_subtopic = None if selected_subtopic == "Koik alamteemad" else selected_subtopic
+active_sources = selected_sources or None
+has_browse_filters = bool(active_course or active_topic or active_subtopic or active_sources)
+
+if user_query or has_browse_filters:
+    effective_query = user_query or active_subtopic or active_topic or active_course or ""
+    query_focus_terms = extract_query_terms(effective_query, search_index["synonyms"]) if user_query else ["browse"]
+    matches = search_catalog(
+        search_index,
+        effective_query,
+        top_k=6,
+        course=active_course,
+        main_topic=active_topic,
+        subtopic=active_subtopic,
+        sources=active_sources,
+    )
+    related_concepts = concept_matches(catalog, effective_query, BASE_DIR, course=active_course)
     if not related_concepts:
         related_concepts = fallback_related_concepts(matches)
 
     left, right = st.columns([1.6, 1])
     with left:
-        if not matches:
-            st.error("Sellele päringule ei leidunud piisavalt tugevaid vasteid.")
+        if not query_focus_terms:
+            st.warning("Päring on liiga üldine või lühike. Lisa 1-2 sisulist märksõna, näiteks teema, mõiste või probleem.")
+        elif not matches:
+            st.error("Sellele päringule ei leidunud piisavalt tugevaid vasteid. Proovi kasutada konkreetsemaid märksõnu või erialatermineid.")
         else:
             if mode == "/learn-topic":
-                st.markdown(build_grounded_learn_answer(user_query, matches, related_concepts))
+                st.markdown(build_grounded_learn_answer(effective_query, matches, related_concepts))
 
             elif mode == "/homework-helper":
                 st.markdown(build_grounded_homework_answer(matches))
@@ -336,7 +405,7 @@ if user_query:
                 if selected_model and matches[0]["score"] >= 0.5:
                     try:
                         st.markdown("**Lühike juhendatud kokkuvõte**")
-                        st.markdown(generate_with_ollama(mode, user_query, matches[:3], selected_model))
+                        st.markdown(generate_with_ollama(mode, effective_query, matches[:3], selected_model))
                     except Exception as exc:
                         st.caption(f"Ollama kokkuvõte ebaõnnestus: {exc}")
 
